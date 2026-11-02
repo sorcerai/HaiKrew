@@ -1,9 +1,10 @@
 /** Stop handling past the read limit: the digest fallback, partial rows, and record_verdict under the ledger lock. */
 import { expect, test } from "claude-code/testing";
 import { reviewTool } from "../../src/mod/agents.ts";
-import { digestScan, emptyScan, parseDigest, readState, runFromDigest, scanEntry } from "../../src/mod/ledger.ts";
+import { addRun, digestScan, emptyScan, parseDigest, readState, runFromDigest, scanEntry } from "../../src/mod/ledger.ts";
 import { ledgerLock } from "../../src/mod/serial.ts";
 import { readTranscript } from "../../src/mod/transcript.ts";
+import { defaults } from "../../src/schema.ts";
 
 const LINE = JSON.stringify({
   type: "assistant",
@@ -59,6 +60,23 @@ const row = (agent: string, name: string) => ({
   ts: "2026-10-30T10:00:00Z", session: "s", agent_id: agent, agent_type: "haiku-coder", model: "haiku", job: "code", lang: "ts",
   duration_s: 1, tokens_in: 1, tokens_out: 1, cache_read: 0, cache_write: 0, tokens_estimated: true, tool_calls: 0, attempts: 1,
   quality: 0, name,
+});
+
+test("a partial stop keeps the row the agent already has, and a full stop replaces a partial row", () => {
+  const settings = defaults() as never;
+  const complete = { ...row("a1", "Ada"), ts: "2026-10-30T10:00:00Z", tokens_in: 50_000, verdict: "pass" };
+  const state = addRun({ runs: [], buckets: [] }, complete as never, settings);
+  const partial = { ...row("a1", "Ada"), ts: "2026-10-30T11:00:00Z", tokens_in: 0, lang: "unknown", partial: true };
+  const kept = addRun(state, partial as never, settings);
+  expect(kept.runs[0]?.tokens_in).toBe(50_000);
+  expect(kept.runs[0]?.verdict).toBe("pass");
+  expect("partial" in (kept.runs[0] as object)).toBe(false);
+
+  const first = addRun({ runs: [], buckets: [] }, partial as never, settings);
+  expect(first.runs[0]?.partial).toBe(true);
+  const full = addRun(first, { ...row("a1", "Ada"), ts: "2026-10-30T12:00:00Z", tokens_in: 7 } as never, settings);
+  expect(full.runs[0]?.tokens_in).toBe(7);
+  expect("partial" in (full.runs[0] as object)).toBe(false);
 });
 
 test("record_verdict and a stop recording at once both keep their writes", async () => {

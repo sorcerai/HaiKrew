@@ -60,6 +60,14 @@ describe("digestFile", () => {
     assert.ok(Buffer.byteLength(JSON.stringify(digest)) < LIMIT);
   });
 
+  it("keeps a line that holds a raw U+2028 or U+2029, as the in-mod parser does", async () => {
+    const body = lines("All\u2028done.\u2029\nVERDICT: PASS");
+    const digest = await digestFile(write("separators.jsonl", body));
+    assert.deepEqual({ ...digest, report: undefined }, { ...parseTranscriptText(body.join("\n")), report: undefined });
+    assert.equal(digest.report, "All\u2028done.\u2029\nVERDICT: PASS");
+    assert.equal(digest.self_verdict, "pass");
+  });
+
   it("rejects a missing file", async () => {
     await assert.rejects(digestFile(join(dir, "gone.jsonl")));
   });

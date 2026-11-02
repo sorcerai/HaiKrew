@@ -404,8 +404,8 @@ function transcriptIo($: Api): TranscriptIo {
 
 /**
  * Append the finished subagent's run to the ledger and return its verdict and model. Skips (returns null) when ledger.enabled
- * is off or the stop names no transcript. A transcript that cannot be read still gets a partial row, so the run stays
- * counted and its changes still get a review plan.
+ * is off or the stop names no transcript. A transcript that cannot be read still gets a partial row, unless the agent has
+ * a row already (addRun keeps that one), so the run stays counted and its changes still get a review plan.
  */
 async function recordStop($: Api, e: Record<string, unknown>, unattributed: string[]): Promise<StopRun | null> {
   const cfg = await loadSettings($);
@@ -424,7 +424,7 @@ async function recordStop($: Api, e: Record<string, unknown>, unattributed: stri
     await $.store.set("ledger", addRun(readState(await $.store.get("ledger")), entry, cfg));
   });
   try {
-    if (!read) $.ui.toast("HaiKrew: could not read a finished agent's transcript, so its ledger row is partial.");
+    if (!read) $.ui.toast("HaiKrew: could not read a finished agent's transcript, so its ledger record is incomplete.");
   } catch {
     // A notice must not cost the run its review plan.
   }

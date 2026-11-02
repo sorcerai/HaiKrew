@@ -94,7 +94,7 @@ export type Transcript = Omit<Run, "ts" | "session" | "agent_id" | "agent_type">
 export type KeyStats = Record<string, string | number>;
 
 const TS_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$/;
-const LINE_SPLIT = /\r\n|\r|\n/;
+export const LINE_SPLIT = /\r\n|\r|\n/;
 // The text Claude Code writes for a turn the user interrupted; it is not a new attempt.
 const INTERRUPT_RE = /^\[Request interrupted by user/;
 const RECENT = 50;
@@ -352,6 +352,7 @@ export function addRun(state: LedgerState, run: Run, settings: Settings): Ledger
   // Claude Code can fire SubagentStop more than once for one agent, and SendMessage resumes a finished one; the later
   // record replaces the earlier one.
   const old = run.agent_id ? state.runs.find((r) => r.agent_id === run.agent_id) : undefined;
+  if (old && run.partial) return state; // a stop whose transcript could not be read knows less than the row it would replace
   const runs = run.agent_id ? state.runs.filter((r) => r.agent_id !== run.agent_id) : state.runs;
   const pending = prunePending(state.pending ?? [], new Date());
   const next = old ? resumed(old, run) : run;
