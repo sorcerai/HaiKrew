@@ -20,7 +20,9 @@ import { noteEffort, stepEffort } from "../src/mod/effort.ts";
 import { noteSeamStart, noteSeamStop } from "../src/mod/seam.ts";
 import { activityOf, agentModel, liveUsage, modelFamily, noteMainChunk, noteMainChange, noteMainStep, noteSpawn, noteStop, noteTokens, noteToolCall, noteToolChange, noteTurnEnd, noteSnapshot, attributedPaths, porcelainPaths, rowFor, specOf, takeSnapshot, touched, touchedBy, unattributedChanges, untrackedName } from "../src/mod/crew.ts";
 import type { RepoSnapshot } from "../src/mod/crew.ts";
-import { addRun, applyOrHold, combineUsage, finalReport, parseCheckerVerdict, parseTranscriptText, readState, runFromStop, summary } from "../src/mod/ledger.ts";
+import { addRun, applyOrHold, combineUsage, parseCheckerVerdict, readState, runFromDigest, runFromStop, summary } from "../src/mod/ledger.ts";
+import { readTranscript } from "../src/mod/transcript.ts";
+import type { TranscriptIo } from "../src/mod/transcript.ts";
 import { buildPacket, reviewNote, testsClaim } from "../src/mod/packet.ts";
 import { applyDefects, countDefects } from "../src/mod/checker.ts";
 import { checkerBucket, sizeOf } from "../src/mod/outcomes.ts";
@@ -383,26 +385,50 @@ async function readFile($: Api, path: string): Promise<string | null> {
   }
 }
 
+/** How long `haikrew digest` may stream a transcript past the 4 MiB read limit. */
+const DIGEST_TIMEOUT_MS = 20_000;
+
+/** Transcript access for a stop: the mod's read, then the CLI, which has no read limit. $.process is CLI only, so on other
+ * surfaces the digest throws and readTranscript gives up. */
+function transcriptIo($: Api): TranscriptIo {
+  return {
+    read: (path) => $.fs.read(path),
+    digest: async (path) => {
+      const argv = ["node", `${$.plugin.root}/bin/haikrew.mjs`, "digest", path];
+      const r = await $.process.run(argv, { timeoutMs: DIGEST_TIMEOUT_MS });
+      if (r.exitCode !== 0) throw new Error(`haikrew digest exited ${r.exitCode}`);
+      return r.stdout;
+    },
+  };
+}
+
 /**
  * Append the finished subagent's run to the ledger and return its verdict and model. Skips (returns null) when ledger.enabled
- * is off or the transcript is unreadable.
+ * is off or the stop names no transcript. A transcript that cannot be read still gets a partial row, so the run stays
+ * counted and its changes still get a review plan.
  */
 async function recordStop($: Api, e: Record<string, unknown>, unattributed: string[]): Promise<StopRun | null> {
   const cfg = await loadSettings($);
   const path = typeof e.agent_transcript_path === "string" ? e.agent_transcript_path : "";
-  const transcript = cfg.ledger.enabled && path ? await readFile($, path) : null;
-  if (transcript === null) return null;
+  if (!cfg.ledger.enabled || !path) return null;
+  const read = await readTranscript(transcriptIo($), path);
   // The transcript's usage lines hold stream-start counts, so the usage counted live from each step wins when seen,
   // unless the transcript saw more input than the live count did (combineUsage).
-  const parsed = runFromStop(e, transcript);
-  const live = liveUsage(String(e.agent_id ?? ""));
+  const id = String(e.agent_id ?? "");
+  const parsed = read ? runFromDigest(e, read) : { ...runFromStop(e, ""), model: agentModel(id) || "unknown", partial: true };
+  const live = liveUsage(id);
   const run = live ? combineUsage(parsed, live) : parsed;
   const decision = decisionFor(run.agent_id);
-  const entry = { ...run, ...(await locateFiles($, touchedBy(run.agent_id))), ...(unattributed.length ? { unattributed } : {}), name: rowFor(run.agent_id, Date.now())?.name ?? untrackedName(run.agent_id, parseTranscriptText(transcript).prompt), ...(decision ? { decision } : {}) };
+  const entry = { ...run, ...(await locateFiles($, touchedBy(run.agent_id))), ...(unattributed.length ? { unattributed } : {}), name: rowFor(run.agent_id, Date.now())?.name ?? untrackedName(run.agent_id, read?.prompt ?? ""), ...(decision ? { decision } : {}) };
   await ledgerLock(async () => {
     await $.store.set("ledger", addRun(readState(await $.store.get("ledger")), entry, cfg));
   });
-  return { self_verdict: run.self_verdict ?? "none", model: run.model, job: run.job, lang: run.lang, report: finalReport(transcript), unattributed };
+  try {
+    if (!read) $.ui.toast("HaiKrew: could not read a finished agent's transcript, so its ledger row is partial.");
+  } catch {
+    // A notice must not cost the run its review plan.
+  }
+  return { self_verdict: run.self_verdict ?? "none", model: run.model, job: run.job, lang: run.lang, report: read?.report ?? "", unattributed };
 }
 
 /**
