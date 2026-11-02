@@ -428,7 +428,7 @@ async function recordStop($: Api, e: Record<string, unknown>, unattributed: stri
   } catch {
     // A notice must not cost the run its review plan.
   }
-  return { self_verdict: run.self_verdict ?? "none", model: run.model, job: run.job, lang: run.lang, report: read?.report ?? "", unattributed };
+  return { self_verdict: run.self_verdict ?? "none", model: run.model, job: run.job, lang: run.lang, report: read?.report ?? "", unattributed, partial: !read };
 }
 
 /**
@@ -455,6 +455,12 @@ async function planReview($, e: Record<string, unknown>, run: StopRun | null): P
     .find((k) => k.model === run.model && k.job === run.job && k.lang === run.lang);
   const record = stats && Number(stats.judged) > 0 ? { judged: Number(stats.judged), passRate: Number(stats.pass_rate) } : null;
   const { paths, lines } = touched(id);
+  // A resumed agent that stops again is noted once more only when its touched lines or paths grew (a deletion-only new
+  // file adds a path and no lines). Its packet still updates, unless this stop could not read the transcript and has
+  // nothing new: the stored packet holds the report and the test claim this stop lost.
+  const seen = notedLines(await $.store.get("review_noted"))[id];
+  const grew = !seen || lines > seen.lines || paths.length > seen.paths;
+  if (run.partial && !grew) return;
   const own = state.runs.find((r) => r.agent_id === id);
   const bucket = checkerBucket(state.runs, run.job, run.lang, own ? sizeOf(own) : "");
   const plan = reviewPlan({ checkerBucket: bucket, mainModel: await sessionModel($), job: run.job, lang: run.lang, paths, lines, testsPassed: testsClaim(run.report), model: run.model, record, explored: wasExplored(id) },
@@ -481,11 +487,7 @@ async function planReview($, e: Record<string, unknown>, run: StopRun | null): P
     await $.store.set("review_packets", Object.fromEntries(keep.map((k) => [k, packets[k]])));
     await $.store.set("review_packet_ids", Object.fromEntries(Object.entries(ids).filter(([, n]) => keep.includes(n))));
   });
-  // A resumed agent that stops again is noted once more only when its touched lines or paths grew (a deletion-only new
-  // file adds a path and no lines); the packet above still updates.
-  const noted = notedLines(await $.store.get("review_noted"));
-  const seen = noted[id];
-  if (seen && lines <= seen.lines && paths.length <= seen.paths) return;
+  if (!grew) return;
   // Without agent tools the reviewer cannot fetch the packet, so the note carries it.
   const text = reviewNote(name, plan, paths, lines, { toolsOn: toolsOn(cfg), packet: String(packet) });
   if (!text) return;
@@ -546,7 +548,7 @@ function toolsOn(cfg: unknown): boolean {
   return (cfg as { agents?: { control?: string } }).agents?.control === "change";
 }
 
-type StopRun = { self_verdict: string; model: string; job: string; lang: string; report: string; unattributed: string[] };
+type StopRun = { self_verdict: string; model: string; job: string; lang: string; report: string; unattributed: string[]; partial: boolean };
 
 function asRecord(v: unknown): Record<string, string> {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? { ...(v as Record<string, string>) } : {};
