@@ -37,7 +37,7 @@ export type HomeData = {
   update?: { latest: string; installed: string; manual?: boolean };
 };
 
-const NOTES_URL = "https://github.com/adriancmurray/HaiKrew/blob/main/CHANGELOG.md";
+const NOTES_URL = "https://github.com/sorcerai/HaiKrew/blob/main/CHANGELOG.md";
 
 /** The strip at the top of the home page: a newer release, its notes link, and the Update button (gone once updated). */
 export function updateStrip(ui: Ui, act: Actions, u: { latest: string; installed: string; manual?: boolean }): unknown {

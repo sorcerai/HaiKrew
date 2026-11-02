@@ -3,7 +3,7 @@
  * pane can say when a newer HaiKrew exists. The fetch, the stored record and the clock come in as arguments; `runUpdate`
  * takes the command runner the same way. State is module memory (the in-flight check only).
  */
-export const UPDATE_URL = "https://raw.githubusercontent.com/adriancmurray/HaiKrew/main/plugin/.claude-plugin/plugin.json";
+export const UPDATE_URL = "https://raw.githubusercontent.com/sorcerai/HaiKrew/main/plugin/.claude-plugin/plugin.json";
 export const UPDATE_EVERY_MS = 6 * 3600 * 1000;
 export const UPDATE_TIMEOUT_MS = 5000;
 export const UPDATE_COMMAND = ["claude", "plugin", "update", "haikrew@haikrew"];

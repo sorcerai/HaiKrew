@@ -65,7 +65,7 @@ claude --plugin-dir /path/to/HaiKrew/plugin
 Install from GitHub:
 
 ```text
-/plugin marketplace add adriancmurray/HaiKrew
+/plugin marketplace add sorcerai/HaiKrew
 /plugin install haikrew@haikrew
 ```
 
